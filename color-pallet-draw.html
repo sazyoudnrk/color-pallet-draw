@@ -1,0 +1,1904 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>おえかき</title>
+<style>
+  :root{
+    --bg: #1b1b1f;
+    --panel: #232329;
+    --panel-2: #2c2c33;
+    --ink: #f2f0ea;
+    --muted: #8b8a94;
+    --accent: #f2f0ea;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    overscroll-behavior: none;
+    touch-action: manipulation; /* ダブルタップでのページズームを抑止 */
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+  }
+  header {
+    padding: 12px 14px 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  h1 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin: 0;
+  }
+  h1 span { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 6px; }
+  #save {
+    background: var(--panel);
+    border: none;
+    color: var(--ink);
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    font-size: 17px;
+    cursor: pointer;
+  }
+  #save:active { background: var(--panel-2); }
+
+  /* キャンバス外はグレー、キャンバス自体(#paper)は白 */
+  #canvas-wrap {
+    flex: 1;
+    margin: 4px 12px;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #4a4a52;
+    box-shadow: 0 0 0 1px #33333a;
+    position: relative;
+    touch-action: none;
+  }
+  #stage {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    transform-origin: 0 0;
+  }
+  #paper {
+    position: absolute;
+    top: 0; left: 0;
+    background: #ffffff;
+    z-index: -1;
+  }
+  #stage canvas {
+    position: absolute;
+    top: 0; left: 0;
+    touch-action: none;
+    image-rendering: pixelated;
+  }
+
+  #dock {
+    padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .row::-webkit-scrollbar { display: none; }
+
+  .group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--panel);
+    padding: 5px;
+    border-radius: 14px;
+    flex-shrink: 0;
+  }
+
+  .icon-btn {
+    background: none;
+    border: none;
+    color: var(--ink);
+    font-size: 15px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .icon-btn:active { background: var(--panel-2); }
+  .icon-btn.active {
+    background: var(--ink);
+    color: #16161a;
+  }
+  .icon-btn.off { opacity: 0.35; }
+
+  .pen-btn {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 10px;
+    width: auto;
+  }
+
+  .swatches {
+    display: flex;
+    gap: 6px;
+    background: var(--panel);
+    padding: 5px;
+    border-radius: 14px;
+    flex: 1;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .swatches::-webkit-scrollbar { display: none; }
+  .swatch {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    position: relative;
+  }
+  .swatch.active {
+    box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px currentColor;
+  }
+
+  .dropdown {
+    background: var(--panel);
+    color: var(--ink);
+    border: none;
+    border-radius: 14px;
+    padding: 8px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    -webkit-appearance: none;
+    appearance: none;
+    flex-shrink: 0;
+  }
+  .dropdown:disabled { opacity: 0.4; }
+
+  .zoom-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--ink);
+    min-width: 40px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .size-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel);
+    padding: 5px 10px;
+    border-radius: 14px;
+    flex: 1;
+    min-width: 90px;
+  }
+  .size-wrap span { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+  #size-value {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--ink) !important;
+    min-width: 34px;
+    text-align: right;
+  }
+  input[type="range"] {
+    flex: 1;
+    accent-color: var(--ink);
+    min-width: 100px;
+  }
+
+  /* ---------- ツールバー折りたたみ ---------- */
+  #dock-extra {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  #dock.collapsed #dock-extra { display: none; }
+  /* アンドゥ/リドゥとトグルは折りたたみ対象の外に置き、常に見えるようにする */
+  #dock-toggle-row { justify-content: space-between; overflow: visible; }
+  #undo-group { flex-shrink: 0; }
+  #undo-group .icon-btn { width: 34px; height: 28px; font-size: 15px; }
+  #dock-toggle {
+    width: 44px;
+    height: 28px;
+    font-size: 11px;
+    background: var(--panel);
+    flex-shrink: 0;
+  }
+  /* 必須行は横スクロールで全項目に到達できるようにする */
+  #essential-row {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #essential-row::-webkit-scrollbar { display: none; }
+  #essential-row .size-wrap { min-width: 130px; }
+  #dock-toggle { flex-shrink: 0; }
+
+  /* ---------- 汎用ポップアップ(レイヤー/設定/色相環で共用) ---------- */
+  .popup-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 100;
+  }
+  .popup-panel {
+    background: var(--panel);
+    width: 100%;
+    max-width: 420px;
+    border-radius: 20px 20px 0 0;
+    padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+    max-height: 75vh;
+    overflow-y: auto;
+  }
+  .popup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .popup-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--panel-2);
+  }
+  .popup-row:last-child { border-bottom: none; }
+  .popup-row-label {
+    background: none;
+    border: none;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: left;
+    flex: 1;
+  }
+  .popup-row-label.active { background: var(--panel-2); }
+  .popup-slider-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 2px; border-bottom: 1px solid var(--panel-2); }
+  .popup-slider-row:last-child { border-bottom: none; }
+  .popup-slider-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .popup-slider-row input[type="range"] { width: 100%; }
+  .popup-hsl-info { font-size: 12px; color: var(--ink); line-height: 1.8; }
+  .wheel-canvas, .sl-canvas { border-radius: 12px; display: block; margin: 0 auto 10px; }
+  .colorwheel-flex { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  .mini-wheel-canvas, .mini-sl-canvas {
+    border-radius: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+    background: var(--panel);
+  }
+
+  /* ---------- おすすめ配色バー ---------- */
+  .scheme-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1;
+    min-width: 0;
+  }
+  .scheme-bar {
+    display: flex;
+    height: 30px;
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid transparent;
+    flex-shrink: 0;
+  }
+  .scheme-bar.active { border-color: var(--ink); }
+  .scheme-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .scheme-empty {
+    font-size: 11px;
+    color: var(--muted);
+    padding: 6px 2px;
+  }
+  .role-picker-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .role-picker-swatch {
+    width: 30px; height: 30px; border-radius: 8px; border: 2px solid transparent; cursor: pointer;
+  }
+  .role-picker-swatch.active { border-color: var(--ink); }
+  .role-mode-btns { display: flex; gap: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>おえかき <span id="mode-label"></span> <span id="canvas-size-label" style="font-size: 11px; color: var(--muted); margin-left: 8px;"></span></h1>
+  <button id="save" title="保存">💾</button>
+</header>
+
+<div id="canvas-wrap"><div id="stage"><div id="paper"></div></div></div>
+
+<div id="dock">
+
+  <!-- 常時表示バー: アンドゥ/リドゥ + 折りたたみトグル -->
+  <div class="row" id="dock-toggle-row">
+    <div class="group" id="undo-group">
+      <button class="icon-btn" id="undo" title="戻す">↺</button>
+      <button class="icon-btn" id="redo" title="進む">↻</button>
+    </div>
+    <button class="icon-btn" id="dock-toggle" title="ツールバーを折りたたむ">▼</button>
+  </div>
+
+  <!-- ▼ここから折りたたみ対象(collapsed時は非表示) -->
+  <div id="dock-extra">
+
+    <!-- 上部タブ(レイヤー/ズーム/詳細設定/レイヤー消去) -->
+    <div class="row" id="top-tabs-row">
+      <div class="group" id="top-tabs">
+        <button class="icon-btn" id="tab-layers" title="レイヤー">📑</button>
+        <button class="icon-btn" id="tab-zoom" title="ズーム">🔍</button>
+        <button class="icon-btn" id="tab-settings" title="詳細設定">⚙️</button>
+        <button class="icon-btn" id="clear-layer" title="このレイヤーを消す">🗑</button>
+      </div>
+    </div>
+
+    <!-- パレット選択行 -->
+    <div class="row">
+      <select class="dropdown" id="color-type-select">
+        <option value="full">全色</option>
+        <option value="vivid">ビビット</option>
+        <option value="muted">くすみ</option>
+        <option value="pastel">パステル</option>
+      </select>
+      <select class="dropdown" id="hue-type-select">
+        <option value="square">四角(4色)</option>
+        <option value="triangle">三角(3色)</option>
+        <option value="complement">補色(2色)</option>
+        <option value="broom">ほうき(4色)</option>
+        <option value="analogous">同系色(3色)</option>
+        <option value="random">ランダム(4色)</option>
+      </select>
+      <button class="icon-btn" id="shuffle" title="パレットを生成">🎲</button>
+      <button class="icon-btn pen-btn" id="default-toggle" title="定番パレット">定番</button>
+      <button class="icon-btn" id="colorwheel-btn" title="色相環で確認">🎨</button>
+    </div>
+
+    <!-- 配色バー -->
+    <div class="row" id="scheme-row">
+      <div class="scheme-wrap" id="scheme-wrap"></div>
+      <button class="icon-btn" id="scheme-config-btn" title="配色を指定">🎚</button>
+    </div>
+
+    <!-- ミニ色相環・SL表示 -->
+    <div class="row">
+      <canvas id="mini-wheel" width="56" height="56" class="mini-wheel-canvas" title="色相環(タップで詳細)"></canvas>
+      <canvas id="mini-sl" width="120" height="56" class="mini-sl-canvas" title="彩度・明度(タップで詳細)"></canvas>
+    </div>
+
+  </div>
+  <!-- ▲ここまで折りたたみ対象 -->
+
+  <!-- スウォッチ行(常時表示) -->
+  <div class="row">
+    <div class="swatches" id="swatches"></div>
+  </div>
+
+  <!-- 必須1行: ペン選択 / 太さ -->
+  <div class="row" id="essential-row">
+    <div class="group" id="tools-group">
+      <button class="icon-btn pen-btn" data-pen="pen">ペン</button>
+      <button class="icon-btn pen-btn" data-pen="pen2">ペン2</button>
+      <button class="icon-btn" id="eraser" title="消しゴム">🧽</button>
+      <button class="icon-btn" id="bucket" title="バケツ塗り">🪣</button>
+      <button class="icon-btn" id="pan-tool" title="移動(パン)">✋</button>
+    </div>
+    <div class="size-wrap">
+      <span>太さ</span>
+      <input type="range" id="size" min="1" max="50" value="10">
+      <span id="size-value">10px</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const wrap = document.getElementById('canvas-wrap');
+  const stage = document.getElementById('stage');
+  const paper = document.getElementById('paper');
+  const swatchWrap = document.getElementById('swatches');
+  const sizeSlider = document.getElementById('size');
+  const sizeValueLabel = document.getElementById('size-value');
+  const shuffleBtn = document.getElementById('shuffle');
+  const colorTypeSelect = document.getElementById('color-type-select');
+  const hueTypeSelect = document.getElementById('hue-type-select');
+  const defaultToggleBtn = document.getElementById('default-toggle');
+  const colorwheelBtn = document.getElementById('colorwheel-btn');
+  const modeLabel = document.getElementById('mode-label');
+  const saveBtn = document.getElementById('save');
+  const eraserBtn = document.getElementById('eraser');
+  const bucketBtn = document.getElementById('bucket');
+  const panToolBtn = document.getElementById('pan-tool');
+  const penBtns = [...document.querySelectorAll('[data-pen]')];
+  const tabLayersBtn = document.getElementById('tab-layers');
+  const tabZoomBtn = document.getElementById('tab-zoom');
+  const tabSettingsBtn = document.getElementById('tab-settings');
+  const clearLayerBtn = document.getElementById('clear-layer');
+  const undoBtn = document.getElementById('undo');
+  const redoBtn = document.getElementById('redo');
+  const dock = document.getElementById('dock');
+  const dockToggleBtn = document.getElementById('dock-toggle');
+  const miniWheelCanvas = document.getElementById('mini-wheel');
+  const miniSLCanvas = document.getElementById('mini-sl');
+
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+  let currentColor = null;
+  let currentPaletteColors = [];
+  let currentTool = 'pen'; // 'pen' | 'pen2' | 'eraser' | 'bucket' | 'pan'
+  let drawing = false;
+  let lastTime = 0;
+  let rawPoint = null;    // 生の指の位置(キャンバス座標系)
+  let smoothPoint = null; // 補正後の描画位置(キャンバス座標系)
+  let panStart = null;    // 単指パンツール用の開始情報
+
+  // 手ぶれ補正: 大きいほど生の位置に近い(遅延が少ない) = 補正弱い
+  const SMOOTHING_LEVELS = [
+    { key: 'off',   label: '補正:なし', factor: 1 },
+    { key: 'light', label: '補正:弱',   factor: 0.6 },
+    { key: 'heavy', label: '補正:強',   factor: 0.28 },
+  ];
+  let smoothingIndex = 1; // デフォルトは「弱」
+
+  const PEN_STYLES = {
+    pen: { widthMul: 1.0 }, // ペン: くっきり一定の太さの線(不透明度は常に100%)
+  };
+
+  function clampNum(v, min, max) { return Math.min(max, Math.max(min, v)); }
+  function snap(v) { return Math.round(v); } // アンチエイリアス低減のため整数pxへスナップ
+
+  // ========================================================================
+  // ズーム / パン
+  // 表示倍率(CSS transform)のみを変更し、キャンバスの実解像度は変えない。
+  // 1本指=描画 / 2本指ドラッグ=パン / 2本指ピンチ=ズーム、を想定。
+  // ========================================================================
+  const ZOOM_MIN = 0.25, ZOOM_MAX = 8;
+  let zoom = 1;
+  let panX = 0, panY = 0;
+
+  function applyZoom() {
+    stage.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  }
+
+  // キャンバス(#paper/#stage)が完全に画面外へ消えないよう、
+  // 常に一定量(margin)は画面内に残るようパン位置を制限する。
+  // 縮小してキャンバス全体が画面に収まる場合は、はみ出させず中央に留める。
+  function clampPan() {
+    const rect = wrap.getBoundingClientRect();
+    const dispW = rect.width * zoom, dispH = rect.height * zoom;
+    if (dispW <= rect.width) {
+      panX = (rect.width - dispW) / 2;
+    } else {
+      const margin = Math.min(80, dispW / 2);
+      panX = clampNum(panX, margin - dispW, rect.width - margin);
+    }
+    if (dispH <= rect.height) {
+      panY = (rect.height - dispH) / 2;
+    } else {
+      const margin = Math.min(80, dispH / 2);
+      panY = clampNum(panY, margin - dispH, rect.height - margin);
+    }
+  }
+
+  // ズームボタンは「画面中心」を基点にズームする(ピンチ操作と同じアンカー方式)。
+  // 従来はキャンバス左上を基点にしていたため、ボタンを押すたびに表示が
+  // 予期せずジャンプし、結果的に「タッチ位置と描画位置がズレる」ように感じる原因になっていた。
+  function zoomAroundCenter(newZoom) {
+    const rect = wrap.getBoundingClientRect();
+    const cx = rect.width / 2, cy = rect.height / 2;
+    const stageLocalX = (cx - panX) / zoom;
+    const stageLocalY = (cy - panY) / zoom;
+    zoom = clampNum(newZoom, ZOOM_MIN, ZOOM_MAX);
+    panX = cx - stageLocalX * zoom;
+    panY = cy - stageLocalY * zoom;
+    clampPan(); // 画面に収まるサイズなら中央寄せされる
+    applyZoom();
+  }
+
+  // ---------- レイヤー管理 ----------
+  const LAYER_COUNT = 3;
+  const layers = []; // {canvas, ctx, visible, undoStack, redoStack}
+  let activeLayerIndex = LAYER_COUNT - 1;
+
+  function makeCanvas(z) {
+    const c = document.createElement('canvas');
+    c.style.zIndex = z;
+    stage.appendChild(c);
+    return c;
+  }
+
+  for (let i = 0; i < LAYER_COUNT; i++) {
+    const canvas = makeCanvas(i);
+    layers.push({
+      canvas,
+      ctx: canvas.getContext('2d'),
+      visible: true,
+      undoStack: [],
+      redoStack: [],
+    });
+  }
+
+  function activeLayer() { return layers[activeLayerIndex]; }
+
+  // ========================================================================
+  // 汎用ポップアップ(レイヤー選択・詳細設定・色相環 で共用する土台)
+  // ========================================================================
+  let currentPopup = null;
+  let currentPopupType = null;
+
+  function closePopup() {
+    if (currentPopup) currentPopup.remove();
+    currentPopup = null;
+    currentPopupType = null;
+  }
+
+  function openPopup(type, titleText, buildFn) {
+    closePopup();
+    currentPopupType = type;
+    const overlay = document.createElement('div');
+    overlay.className = 'popup-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closePopup(); });
+
+    const panel = document.createElement('div');
+    panel.className = 'popup-panel';
+
+    const header = document.createElement('div');
+    header.className = 'popup-header';
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = titleText;
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'icon-btn';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', closePopup);
+    header.appendChild(titleSpan);
+    header.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    body.id = 'popup-body';
+    buildFn(body);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    currentPopup = overlay;
+  }
+
+  function refreshPopupIfType(type) {
+    if (currentPopup && currentPopupType === type) {
+      const body = currentPopup.querySelector('#popup-body');
+      body.innerHTML = '';
+      if (type === 'layers') buildLayersPopupContent(body);
+      if (type === 'settings') buildSettingsPopupContent(body);
+      if (type === 'colorwheel') buildColorWheelPopupContent(body);
+      if (type === 'scheme') buildSchemeConfigContent(body);
+      if (type === 'zoom') buildZoomPopupContent(body);
+    }
+  }
+
+  // ---- レイヤーポップアップ ----
+  function buildLayersPopupContent(container) {
+    layers.forEach((layer, i) => {
+      const row = document.createElement('div');
+      row.className = 'popup-row';
+      const label = document.createElement('button');
+      label.className = 'popup-row-label' + (i === activeLayerIndex ? ' active' : '');
+      label.textContent = `レイヤー ${i + 1}`;
+      label.addEventListener('click', () => {
+        activeLayerIndex = i;
+        refreshPopupIfType('layers');
+      });
+      const eye = document.createElement('button');
+      eye.className = 'icon-btn' + (layer.visible ? '' : ' off');
+      eye.textContent = layer.visible ? '👁' : '🚫';
+      eye.addEventListener('click', (e) => {
+        e.stopPropagation();
+        layer.visible = !layer.visible;
+        layer.canvas.style.opacity = layer.visible ? '1' : '0';
+        refreshPopupIfType('layers');
+      });
+      row.appendChild(label);
+      row.appendChild(eye);
+      container.appendChild(row);
+    });
+  }
+  // タブボタン: レイヤー / ズーム / 詳細設定
+  tabLayersBtn.addEventListener('click', () => openPopup('layers', 'レイヤー', buildLayersPopupContent));
+  tabZoomBtn.addEventListener('click', () => openPopup('zoom', 'ズーム', buildZoomPopupContent));
+  tabSettingsBtn.addEventListener('click', () => openPopup('settings', '詳細設定', buildSettingsPopupContent));
+
+  // レイヤー消去(メニューに隠さず従来どおりゴミ箱アイコンで見えるようにする)
+  clearLayerBtn.addEventListener('click', () => {
+    const layer = activeLayer();
+    pushHistory(layer);
+    layer.ctx.save();
+    layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    layer.ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+    layer.ctx.restore();
+  });
+
+  // 常時表示のアンドゥ/リドゥ(頻繁に使うためメニューには入れない)
+  undoBtn.addEventListener('click', () => {
+    const layer = activeLayer();
+    if (!layer.undoStack.length) return;
+    layer.redoStack.push(layer.canvas.toDataURL());
+    restoreFromDataURL(layer, layer.undoStack.pop());
+  });
+  redoBtn.addEventListener('click', () => {
+    const layer = activeLayer();
+    if (!layer.redoStack.length) return;
+    layer.undoStack.push(layer.canvas.toDataURL());
+    restoreFromDataURL(layer, layer.redoStack.pop());
+  });
+
+  // ツールバーの折りたたみ。畳むと必須1行(+スウォッチ)だけになり描画領域が広がる
+  dockToggleBtn.addEventListener('click', () => {
+    const collapsed = dock.classList.toggle('collapsed');
+    dockToggleBtn.textContent = collapsed ? '▲' : '▼';
+    dockToggleBtn.title = collapsed ? 'ツールバーを展開' : 'ツールバーを折りたたむ';
+    // 表示領域が変わるのでキャンバスサイズを取り直す
+    resizeAllCanvases();
+  });
+
+  // ---- 詳細設定ポップアップ(今後の設定項目もここに追加していく) ----
+  let matchLightness = false; // 「明度を揃える」: ONなら全色で明度を完全一致させる
+  let showDefaultButton = false; // 「定番」ボタンの表示/非表示。デフォルトはOFF(非表示)
+  // 色相のランダム変動量(初期値は改修前の実装値をそのまま踏襲)
+  const hueJitterSettings = { square: 20, triangle: 20, complement: 15, broom: 10, analogous: 10 };
+  // キャンバスサイズプリセット: {name, width, height}
+  const CANVAS_SIZE_PRESETS = [
+    { name: '画面に合わせる', width: null, height: null },
+    { name: '512×512', width: 512, height: 512 },
+    { name: '768×768', width: 768, height: 768 },
+    { name: '1024×1024', width: 1024, height: 1024 },
+  ];
+  let selectedCanvasSizeIndex = 0; // デフォルトは「画面に合わせる」
+
+  // 「定番」ボタンの表示状態を反映する。非表示にする場合、定番パレットが
+  // 選択されたままだと操作不能になるため、通常のパレット生成に戻す。
+  function applyDefaultButtonVisibility() {
+    defaultToggleBtn.style.display = showDefaultButton ? 'flex' : 'none';
+    if (!showDefaultButton && useDefaultPalette) {
+      useDefaultPalette = false;
+      defaultToggleBtn.classList.remove('active');
+      applyPalette();
+    }
+  }
+
+  function buildSettingsPopupContent(container) {
+    // 手ぶれ補正(メニュー廃止に伴い設定へ集約)
+    const smoothRow = document.createElement('div');
+    smoothRow.className = 'popup-row';
+    const smoothLabel = document.createElement('span');
+    smoothLabel.textContent = '手ぶれ補正';
+    smoothLabel.style.fontSize = '13px';
+    smoothLabel.style.fontWeight = '600';
+    const smoothBtn = document.createElement('button');
+    smoothBtn.className = 'icon-btn pen-btn';
+    smoothBtn.textContent = SMOOTHING_LEVELS[smoothingIndex].label;
+    smoothBtn.addEventListener('click', () => {
+      smoothingIndex = (smoothingIndex + 1) % SMOOTHING_LEVELS.length;
+      smoothBtn.textContent = SMOOTHING_LEVELS[smoothingIndex].label;
+    });
+    smoothRow.appendChild(smoothLabel);
+    smoothRow.appendChild(smoothBtn);
+    container.appendChild(smoothRow);
+
+    const toggleRow = document.createElement('div');
+    toggleRow.className = 'popup-row';
+    const toggleLabel = document.createElement('span');
+    toggleLabel.textContent = '明度を揃える';
+    toggleLabel.style.fontSize = '13px';
+    toggleLabel.style.fontWeight = '600';
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'icon-btn pen-btn' + (matchLightness ? ' active' : '');
+    toggleBtn.textContent = matchLightness ? 'ON' : 'OFF';
+    toggleBtn.addEventListener('click', () => {
+      matchLightness = !matchLightness;
+      refreshPopupIfType('settings');
+    });
+    toggleRow.appendChild(toggleLabel);
+    toggleRow.appendChild(toggleBtn);
+    container.appendChild(toggleRow);
+
+    const dtRow = document.createElement('div');
+    dtRow.className = 'popup-row';
+    const dtLabel = document.createElement('span');
+    dtLabel.textContent = '「定番」ボタンを表示';
+    dtLabel.style.fontSize = '13px';
+    dtLabel.style.fontWeight = '600';
+    const dtBtn = document.createElement('button');
+    dtBtn.className = 'icon-btn pen-btn' + (showDefaultButton ? ' active' : '');
+    dtBtn.textContent = showDefaultButton ? 'ON' : 'OFF';
+    dtBtn.addEventListener('click', () => {
+      showDefaultButton = !showDefaultButton;
+      applyDefaultButtonVisibility();
+      refreshPopupIfType('settings');
+    });
+    dtRow.appendChild(dtLabel);
+    dtRow.appendChild(dtBtn);
+    container.appendChild(dtRow);
+
+    [['square', '四角'], ['triangle', '三角'], ['complement', '補色'], ['broom', 'ほうき'], ['analogous', '同系色']].forEach(([key, label]) => {
+      const row = document.createElement('div');
+      row.className = 'popup-slider-row';
+      const head = document.createElement('div');
+      head.className = 'popup-slider-head';
+      head.innerHTML = `<span>${label}の色相ランダム幅</span><span>±${hueJitterSettings[key]}°</span>`;
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '5';
+      slider.max = '45';
+      slider.value = String(hueJitterSettings[key]);
+      slider.addEventListener('input', () => {
+        hueJitterSettings[key] = Number(slider.value);
+        head.querySelector('span:last-child').textContent = `±${slider.value}°`;
+      });
+      row.appendChild(head);
+      row.appendChild(slider);
+      container.appendChild(row);
+    });
+
+    // キャンバスサイズ選択
+    const sizeLabel = document.createElement('span');
+    sizeLabel.textContent = 'キャンバスサイズ';
+    sizeLabel.style.fontSize = '13px';
+    sizeLabel.style.fontWeight = '600';
+    sizeLabel.style.display = 'block';
+    sizeLabel.style.marginTop = '10px';
+    container.appendChild(sizeLabel);
+
+    CANVAS_SIZE_PRESETS.forEach((preset, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'icon-btn pen-btn' + (idx === selectedCanvasSizeIndex ? ' active' : '');
+      btn.textContent = preset.name;
+      btn.style.marginRight = '6px';
+      btn.style.marginTop = '6px';
+      btn.addEventListener('click', () => {
+        selectedCanvasSizeIndex = idx;
+        updateCanvasSizeLabel();
+        resizeAllCanvases();
+        refreshPopupIfType('settings');
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  // ---- ズームポップアップ ----
+  function buildZoomPopupContent(container) {
+    const currentZoom = Math.round(zoom * 100);
+    
+    const head = document.createElement('div');
+    head.className = 'popup-slider-head';
+    head.style.marginBottom = '10px';
+    head.innerHTML = `<span>現在: ${currentZoom}%</span>`;
+    container.appendChild(head);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'popup-row';
+    btnRow.style.justifyContent = 'center';
+    btnRow.style.gap = '10px';
+    
+    const minusBtn = document.createElement('button');
+    minusBtn.className = 'icon-btn';
+    minusBtn.textContent = '−';
+    minusBtn.addEventListener('click', () => {
+      zoomAroundCenter(zoom / 1.6);
+      refreshPopupIfType('zoom');
+    });
+    
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'icon-btn';
+    resetBtn.textContent = '⟲';
+    resetBtn.addEventListener('click', () => {
+      zoom = 1; panX = 0; panY = 0; clampPan(); applyZoom();
+      refreshPopupIfType('zoom');
+    });
+    
+    const plusBtn = document.createElement('button');
+    plusBtn.className = 'icon-btn';
+    plusBtn.textContent = '＋';
+    plusBtn.addEventListener('click', () => {
+      zoomAroundCenter(zoom * 1.6);
+      refreshPopupIfType('zoom');
+    });
+    
+    btnRow.appendChild(minusBtn);
+    btnRow.appendChild(resetBtn);
+    btnRow.appendChild(plusBtn);
+    container.appendChild(btnRow);
+  }
+
+  // ---- 色相環 / S・Lグラデーション ポップアップ ----
+  function parseColorToHSL(str) {
+    if (str.startsWith('#')) return hexToHsl(str);
+    const m = str.match(/hsl\(([-\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
+    if (m) return { h: Number(m[1]), s: Number(m[2]), l: Number(m[3]) };
+    return { h: 0, s: 0, l: 50 };
+  }
+  function hexToHsl(hex) {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0; const l = (max + min) / 2;
+    const d = max - min;
+    if (d !== 0) {
+      s = d / (1 - Math.abs(2 * l - 1));
+      switch (max) {
+        case r: h = ((g - b) / d) % 6; break;
+        case g: h = (b - r) / d + 2; break;
+        case b: h = (r - g) / d + 4; break;
+      }
+      h *= 60;
+    }
+    return { h: normHue(h), s: s * 100, l: l * 100 };
+  }
+  function hslToRgb(h, s, l) {
+    h = normHue(h); s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r1, g1, b1;
+    if (h < 60) [r1, g1, b1] = [c, x, 0];
+    else if (h < 120) [r1, g1, b1] = [x, c, 0];
+    else if (h < 180) [r1, g1, b1] = [0, c, x];
+    else if (h < 240) [r1, g1, b1] = [0, x, c];
+    else if (h < 300) [r1, g1, b1] = [x, 0, c];
+    else [r1, g1, b1] = [c, 0, x];
+    return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)];
+  }
+
+  function drawHueWheel(canvas, colors, selected) {
+    const ctx = canvas.getContext('2d');
+    const size = canvas.width, cx = size / 2, cy = size / 2;
+    const outerR = size / 2 - 4, innerR = outerR - 16;
+    ctx.clearRect(0, 0, size, size);
+    // マーカー側の角度計算(下記)と必ず同じ基準(-90度オフセット)を使うこと。
+    // ここがズレるとリングの色とマーカー位置が一致しなくなる。
+    for (let a = 0; a < 360; a++) {
+      ctx.beginPath();
+      ctx.strokeStyle = `hsl(${a},75%,55%)`;
+      ctx.lineWidth = outerR - innerR;
+      ctx.arc(cx, cy, (outerR + innerR) / 2, (a - 90 - 0.6) * Math.PI / 180, (a - 90 + 0.6) * Math.PI / 180);
+      ctx.stroke();
+    }
+    colors.forEach((c) => {
+      const { h } = parseColorToHSL(c);
+      const rad = (h - 90) * Math.PI / 180;
+      const r = (outerR + innerR) / 2;
+      const mx = cx + Math.cos(rad) * r, my = cy + Math.sin(rad) * r;
+      const isSelected = c === selected;
+      ctx.beginPath();
+      ctx.arc(mx, my, isSelected ? 8 : 5, 0, Math.PI * 2);
+      ctx.fillStyle = c;
+      ctx.fill();
+      ctx.lineWidth = isSelected ? 3 : 1.5;
+      ctx.strokeStyle = isSelected ? '#ffffff' : '#00000080';
+      ctx.stroke();
+    });
+  }
+
+  function drawSLGradient(canvas, h, s, l) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, hgt = canvas.height;
+    const imgData = ctx.createImageData(w, hgt);
+    for (let y = 0; y < hgt; y++) {
+      const L = 100 - (y / (hgt - 1)) * 100;
+      for (let x = 0; x < w; x++) {
+        const S = (x / (w - 1)) * 100;
+        const [r, g, b] = hslToRgb(h, S, L);
+        const idx = (y * w + x) * 4;
+        imgData.data[idx] = r; imgData.data[idx + 1] = g; imgData.data[idx + 2] = b; imgData.data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    const mx = (s / 100) * (w - 1), my = (1 - l / 100) * (hgt - 1);
+    ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI * 2);
+    ctx.strokeStyle = '#000000'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  function buildColorWheelPopupContent(container) {
+    const hsl = parseColorToHSL(currentColor || '#000000');
+    const flex = document.createElement('div');
+    flex.className = 'colorwheel-flex';
+
+    const wheelCanvas = document.createElement('canvas');
+    wheelCanvas.width = 170; wheelCanvas.height = 170;
+    wheelCanvas.className = 'wheel-canvas';
+
+    const slCanvas = document.createElement('canvas');
+    slCanvas.width = 170; slCanvas.height = 130;
+    slCanvas.className = 'sl-canvas';
+
+    flex.appendChild(wheelCanvas);
+    flex.appendChild(slCanvas);
+    container.appendChild(flex);
+
+    const info = document.createElement('div');
+    info.className = 'popup-hsl-info';
+    info.innerHTML = `選択中の色<br>H: ${Math.round(hsl.h)}°　S: ${Math.round(hsl.s)}%　L: ${Math.round(hsl.l)}%`;
+    container.appendChild(info);
+
+    drawHueWheel(wheelCanvas, currentPaletteColors, currentColor);
+    drawSLGradient(slCanvas, hsl.h, hsl.s, hsl.l);
+  }
+  colorwheelBtn.addEventListener('click', () => openPopup('colorwheel', '色相環 / 選択色', buildColorWheelPopupContent));
+
+  // 常時表示のミニ色相環・SLグラデーション。詳細ポップアップと同じ描画関数を使うことで
+  // H/S/Lの計算結果が常時表示・詳細表示のあいだでズレないようにする。
+  function updateMiniColorWidgets() {
+    if (!currentColor) return;
+    const hsl = parseColorToHSL(currentColor);
+    drawHueWheel(miniWheelCanvas, currentPaletteColors, currentColor);
+    drawSLGradient(miniSLCanvas, hsl.h, hsl.s, hsl.l);
+  }
+  miniWheelCanvas.addEventListener('click', () => openPopup('colorwheel', '色相環 / 選択色', buildColorWheelPopupContent));
+  miniSLCanvas.addEventListener('click', () => openPopup('colorwheel', '色相環 / 選択色', buildColorWheelPopupContent));
+
+  // ========================================================================
+  // カラーパレット生成
+  // 内部表現: 既存実装(HSL文字列)を踏襲。色相は必ず0〜360°へ正規化する。
+  // 不透明度(Alpha)はここでは一切ランダム化しない(常に不透明な色を生成)。
+  // ========================================================================
+
+  function normHue(h) { return ((h % 360) + 360) % 360; }
+  function rnd(min, max) { return min + Math.random() * (max - min); }
+  function pm(delta) { return delta * (Math.random() < 0.5 ? -1 : 1); } // ±delta
+
+  function hslColor(h, s, l) {
+    return `hsl(${normHue(h).toFixed(1)}, ${clampNum(s, 0, 100).toFixed(0)}%, ${clampNum(l, 0, 100).toFixed(0)}%)`;
+  }
+
+  // ---- 「色の種類」: 彩度・明度の範囲を決定 ----
+  // ※パステルの s/l レンジは手動調整済みのため変更しない
+  const COLOR_TYPES = {
+    full:   { label: '全色',       s: [20, 100], l: [15, 85] },
+    vivid:  { label: 'ビビット',   s: [70, 100], l: [40, 70] },
+    muted:  { label: 'くすみ',     s: [20, 60],  l: [40, 75] },
+    pastel: { label: 'パステル',   s: [20, 55],  l: [80, 100] },
+  };
+
+  // ---- 「色相の選択」: 色相環上の関係と色数を決定 ----
+  // ランダム幅は hueJitterSettings を見て都度参照する(設定パネルから変更可能)
+  const HUE_TYPES = {
+    square: {
+      label: '四角(4色)', count: 4,
+      gen: () => {
+        const d = hueJitterSettings.square;
+        const H1 = rnd(0, 360);
+        return [H1, H1 + 90 + pm(rnd(5, d)), H1 + 180 + pm(rnd(5, d)), H1 + 270 + pm(rnd(5, d))];
+      },
+    },
+    triangle: {
+      label: '三角(3色)', count: 3,
+      gen: () => {
+        const d = hueJitterSettings.triangle;
+        const H1 = rnd(0, 360);
+        return [H1, H1 + 120 + pm(rnd(5, d)), H1 + 240 + pm(rnd(5, d))];
+      },
+    },
+    complement: {
+      label: '補色(2色)', count: 2,
+      gen: () => {
+        const d = hueJitterSettings.complement;
+        const H1 = rnd(0, 360);
+        return [H1, H1 + 180 + pm(rnd(5, d))];
+      },
+    },
+    broom: {
+      label: 'ほうき(4色)', count: 4,
+      gen: () => {
+        const d = hueJitterSettings.broom;
+        const H1 = rnd(0, 360), A = rnd(20, 60);
+        return [H1, H1 + 180, H1 + A + pm(rnd(5, d)), H1 - A + pm(rnd(5, d))];
+      },
+    },
+    analogous: {
+      label: '同系色(3色)', count: 3,
+      // ほうきから補色(H1+180)の枝を取り除いた形。基準色とその左右の近い色相だけで構成する
+      gen: () => {
+        const d = hueJitterSettings.analogous;
+        const H1 = rnd(0, 360), A = rnd(20, 60);
+        return [H1, H1 + A + pm(rnd(5, d)), H1 - A + pm(rnd(5, d))];
+      },
+    },
+    random: {
+      label: 'ランダム(4色)', count: 4,
+      gen: () => [rnd(0, 360), rnd(0, 360), rnd(0, 360), rnd(0, 360)], // 色相関係を持たせない。ランダム幅設定の対象外
+    },
+  };
+
+  // ---- 2軸を組み合わせて最終パレットを生成 ----
+  // 色の種類 → 彩度・明度の範囲 / 色相の選択 → 色相環上の関係、を独立に決定する
+  // 明度(L)は「明度を揃える」がOFFなら色ごとに独立してレンジ全体からランダム、
+  // ONならパレット全体で1回だけ決定して全色に適用する。
+  // 彩度(S)は既存仕様どおり、ベース値を1回決め各色に±10のジッターを乗せる。
+  function generatePalette(colorTypeKey, hueTypeKey) {
+    const ct = COLOR_TYPES[colorTypeKey];
+    const ht = HUE_TYPES[hueTypeKey];
+    const hues = ht.gen();
+    const baseS = rnd(ct.s[0], ct.s[1]);
+    const sharedL = matchLightness ? rnd(ct.l[0], ct.l[1]) : null;
+    return hues.map(H => {
+      const S = clampNum(baseS + pm(rnd(0, 10)), ct.s[0], ct.s[1]);
+      const L = matchLightness ? sharedL : rnd(ct.l[0], ct.l[1]);
+      return hslColor(H, S, L);
+    });
+  }
+
+  // 定番パレット(固定色。既存機能をそのまま維持)
+  const DEFAULT_PALETTE = [
+    '#111111', '#f2f0ea', '#e63946', '#f4a261',
+    '#ffd166', '#2a9d8f', '#264653', '#4361ee',
+    '#7b2cbf', '#ff70a6', '#8d6a4f', '#adb5bd'
+  ];
+
+  function buildSwatches(colors) {
+    currentPaletteColors = colors;
+    swatchWrap.innerHTML = '';
+    colors.forEach((c) => {
+      const b = document.createElement('button');
+      b.className = 'swatch';
+      b.style.background = c;
+      b.style.color = c;
+      b.addEventListener('click', () => selectColor(c, b));
+      swatchWrap.appendChild(b);
+    });
+    selectColor(colors[0], swatchWrap.children[0]);
+    // 新しいパレットになったら、セレクト指定のうち今のパレットに無い色は解除する
+    ROLE_KEYS.forEach(key => {
+      const cfg = roleConfig[key];
+      if (cfg.mode === 'select' && cfg.color && !colors.includes(cfg.color)) cfg.color = null;
+    });
+    activeSchemeIndex = 0;
+    refreshColorSchemes();
+  }
+
+  function selectColor(c, btn) {
+    currentColor = c;
+    [...swatchWrap.children].forEach(el => el.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    updateMiniColorWidgets();
+    // 色を選んだら自動的にペンツールに戻す(消しゴムのままだと分かりにくいので)
+    if (currentTool === 'eraser') setTool('pen');
+  }
+
+  // ========================================================================
+  // おすすめ配色(ベース60% / アソート30% / アクセント10%)
+  // 既存のパレット生成ロジックには手を加えず、その結果を評価して提案するだけ。
+  // 選抜されなかった色もパレットからは削除せず、引き続き使用可能なままにする。
+  // ========================================================================
+  const schemeWrap = document.getElementById('scheme-wrap');
+  const schemeConfigBtn = document.getElementById('scheme-config-btn');
+
+  let colorSchemes = [];      // [{colors:[...], ratios:[...]}, ...]
+  let activeSchemeIndex = 0;
+  // 各役割の決定方法。mode: 'random' | 'select'、colorはselect時に固定する色
+  const roleConfig = {
+    base:   { mode: 'random', color: null },
+    assort: { mode: 'random', color: null },
+    accent: { mode: 'random', color: null },
+  };
+  const ROLE_KEYS = ['base', 'assort', 'accent'];
+  const ROLE_LABELS = { base: 'ベース', assort: 'アソート', accent: 'アクセント' };
+
+  // 色同士の距離。色相だけでなく彩度・明度も加味する。
+  // 色相が近くても明度/彩度が大きく違えば「使い分けられる色」とみなす。
+  function colorDistance(c1, c2) {
+    const a = parseColorToHSL(c1), b = parseColorToHSL(c2);
+    let dh = Math.abs(a.h - b.h);
+    if (dh > 180) dh = 360 - dh;      // 色相環上の最短距離(0〜180)
+    const hueTerm = (dh / 180) * 100;  // 0〜100に正規化
+    const ds = Math.abs(a.s - b.s);
+    const dl = Math.abs(a.l - b.l);
+    // 彩度・明度の差は絵の中での使い分けやすさに直結するため重みを高めにとる
+    return Math.sqrt(hueTerm * hueTerm + ds * ds * 1.4 + dl * dl * 1.6);
+  }
+
+  // 候補の中から、互いの距離が大きくなる3色を貪欲法で選ぶ。
+  // fixed には select 指定で固定された色が入り、必ず結果に含める。
+  function pickDistinctColors(candidates, count, fixed = []) {
+    const picked = [...fixed];
+    const pool = candidates.filter(c => !picked.includes(c));
+    while (picked.length < count && pool.length) {
+      let bestColor = null, bestScore = -1;
+      pool.forEach(c => {
+        // 既に選んだ色との最小距離が最大になる色を選ぶ(同系色の重複を避ける)
+        const score = picked.length
+          ? Math.min(...picked.map(p => colorDistance(c, p)))
+          : parseColorToHSL(c).s; // 最初の1色は彩度が高いものを主役に選びやすくする
+        if (score > bestScore) { bestScore = score; bestColor = c; }
+      });
+      picked.push(bestColor);
+      pool.splice(pool.indexOf(bestColor), 1);
+    }
+    return picked;
+  }
+
+  // 色数に応じた比率を返す
+  function ratiosFor(n) {
+    if (n <= 1) return [100];
+    if (n === 2) return [70, 30];
+    return [60, 30, 10];
+  }
+
+  // roleConfigのselect指定を反映しつつ、残りをランダム(=自動選抜)で埋める
+  // autoColors: 呼び出し側が選抜済みの候補色。paletteはselect指定の有効性チェックにのみ使う
+  // prevPlacement: 前案の役割配置(色→枠index)。同じ色が続けて選ばれた場合、
+  //   同じ枠に置かないようにして「同じ色の別の使い方」を提示する。
+  //   select指定の色は役割が固定なのでこの回避の対象外。
+  function applyRoleConfig(autoColors, palette, prevPlacement) {
+    if (autoColors.length < 3) return autoColors; // 2色以下は役割割当をしない
+    const result = [null, null, null];
+    ROLE_KEYS.forEach((key, i) => {
+      const cfg = roleConfig[key];
+      if (cfg.mode === 'select' && cfg.color && palette.includes(cfg.color)) {
+        result[i] = cfg.color;
+      }
+    });
+    const fixed = result.filter(Boolean);
+    // 候補はautoColorsに限定する。ここでpaletteを見てしまうと呼び出し側の選抜
+    // (例: 案2に未使用色を必ず含める)が破棄され、案1と同じ結果になってしまう
+    const pool = [...fixed, ...autoColors.filter(c => !fixed.includes(c))];
+    const filled = pickDistinctColors(pool, 3, fixed);
+    const rest = filled.filter(c => !fixed.includes(c));
+    const slots = [0, 1, 2].filter(i => !result[i]);
+
+    // 空き枠への並べ方を全通り試し、前案と同じ枠に来る色が最も少ない並びを採る。
+    // 枠は3つしかないため回避しきれない場合もあるが、その時は衝突数が最小のものを選ぶ。
+    const best = { order: rest, conflicts: Infinity };
+    permutations(rest).forEach(order => {
+      let conflicts = 0;
+      order.forEach((color, k) => {
+        if (prevPlacement && prevPlacement.get(color) === slots[k]) conflicts++;
+      });
+      if (conflicts < best.conflicts) { best.conflicts = conflicts; best.order = order; }
+    });
+
+    slots.forEach((slot, k) => { result[slot] = best.order[k]; });
+    return result.filter(Boolean);
+  }
+
+  // 配列の全順列を返す(要素数は最大3なので総当たりで十分)
+  function permutations(arr) {
+    if (arr.length <= 1) return [arr];
+    const out = [];
+    arr.forEach((item, i) => {
+      const restItems = [...arr.slice(0, i), ...arr.slice(i + 1)];
+      permutations(restItems).forEach(p => out.push([item, ...p]));
+    });
+    return out;
+  }
+
+  // 案の色配置を「色→枠index」のMapにする(次案で同じ枠を避けるために使う)
+  function placementOf(colors) {
+    const map = new Map();
+    colors.forEach((c, i) => map.set(c, i));
+    return map;
+  }
+
+  function buildColorSchemes(palette) {
+    const n = palette.length;
+    if (n === 0) return [];
+
+    // 3色以下は生成色をそのまま使う(補色2色に第三色を作ったりはしない)
+    if (n <= 3) {
+      const colors = applyRoleConfig(palette, palette);
+      return [{ colors, ratios: ratiosFor(colors.length) }];
+    }
+
+    // 4色は特殊：案1は差の大きい3色、案2は必ず未使用色 + 残りから2色
+    if (n === 4) {
+      // 案1はパレット全体から選抜(select固定色があればそれを含めて構成される)
+      const plan1 = applyRoleConfig(palette, palette);
+      // 案1で使われなかった1色(4色中3色を使うので必ず1つ残る)
+      const unused = palette.filter(c => !plan1.includes(c))[0];
+      // その未使用色を必ず含め、残り3色から差の大きい2色を足して案2にする
+      const others = palette.filter(c => c !== unused);
+      const twoMore = pickDistinctColors(others, 2);
+      const plan2 = applyRoleConfig([unused, ...twoMore], palette);
+
+      return [
+        { colors: plan1, ratios: ratiosFor(plan1.length) },
+        { colors: plan2, ratios: ratiosFor(plan2.length) },
+      ];
+    }
+
+    // 5色以上は、差の大きい3色で案1を作る
+    const plan1 = applyRoleConfig(palette, palette);
+    // 案2は案1で使わなかった色を中心に構成し、足りなければ案1の色も借りる
+    const leftovers = palette.filter(c => !plan1.includes(c));
+    let plan2Source = leftovers;
+    if (leftovers.length < 3) {
+      plan2Source = [...leftovers, ...palette.filter(c => !leftovers.includes(c))];
+    }
+    const plan2 = applyRoleConfig(pickDistinctColors(plan2Source, 3), palette);
+
+    const schemes = [{ colors: plan1, ratios: ratiosFor(plan1.length) }];
+    // 案1と全く同じ組み合わせにならない場合のみ案2を追加する
+    const same = plan2.length === plan1.length && plan2.every(c => plan1.includes(c));
+    if (!same) schemes.push({ colors: plan2, ratios: ratiosFor(plan2.length) });
+    return schemes;
+  }
+
+  function renderColorSchemes() {
+    schemeWrap.innerHTML = '';
+    if (!colorSchemes.length) {
+      const p = document.createElement('div');
+      p.className = 'scheme-empty';
+      p.textContent = 'おすすめ配色なし';
+      schemeWrap.appendChild(p);
+      return;
+    }
+    colorSchemes.forEach((scheme, idx) => {
+      const bar = document.createElement('div');
+      bar.className = 'scheme-bar' + (idx === activeSchemeIndex ? ' active' : '');
+      scheme.colors.forEach((c, i) => {
+        const seg = document.createElement('div');
+        seg.className = 'scheme-seg';
+        seg.style.background = c;
+        seg.style.width = `${scheme.ratios[i]}%`;
+        // 明度に応じて読みやすい文字色を選ぶ
+        seg.style.color = parseColorToHSL(c).l > 55 ? '#00000099' : '#ffffffcc';
+        seg.textContent = `${scheme.ratios[i]}%`;
+        // バーの色をタップすると、その色を描画色として選べる
+        seg.addEventListener('click', (e) => {
+          e.stopPropagation();
+          activeSchemeIndex = idx;
+          selectColorByValue(c);
+          renderColorSchemes();
+        });
+        bar.appendChild(seg);
+      });
+      bar.addEventListener('click', () => {
+        activeSchemeIndex = idx;
+        renderColorSchemes();
+      });
+      schemeWrap.appendChild(bar);
+    });
+  }
+
+  function refreshColorSchemes() {
+    colorSchemes = buildColorSchemes(currentPaletteColors);
+    if (activeSchemeIndex >= colorSchemes.length) activeSchemeIndex = 0;
+    renderColorSchemes();
+  }
+
+  // パレット上の色を値で選択する(配色バーからの選択用)
+  function selectColorByValue(c) {
+    const idx = currentPaletteColors.indexOf(c);
+    if (idx >= 0 && swatchWrap.children[idx]) {
+      selectColor(c, swatchWrap.children[idx]);
+    } else {
+      selectColor(c, null);
+    }
+  }
+
+  // ---- 配色の指定パネル(役割ごとに ランダム / セレクト を切り替える) ----
+  function buildSchemeConfigContent(container) {
+    const note = document.createElement('div');
+    note.className = 'scheme-empty';
+    note.textContent = '各役割を「セレクト」にすると色を固定でき、「ランダム」の枠はアプリが自動で選びます。';
+    container.appendChild(note);
+
+    ROLE_KEYS.forEach(key => {
+      const cfg = roleConfig[key];
+      const row = document.createElement('div');
+      row.className = 'popup-slider-row';
+
+      const head = document.createElement('div');
+      head.className = 'popup-slider-head';
+      const name = document.createElement('span');
+      name.textContent = ROLE_LABELS[key];
+      const modeBtns = document.createElement('span');
+      modeBtns.className = 'role-mode-btns';
+      [['random', 'ランダム'], ['select', 'セレクト']].forEach(([mode, label]) => {
+        const b = document.createElement('button');
+        b.className = 'icon-btn pen-btn' + (cfg.mode === mode ? ' active' : '');
+        b.textContent = label;
+        b.addEventListener('click', () => {
+          cfg.mode = mode;
+          if (mode === 'random') cfg.color = null;
+          refreshColorSchemes();
+          refreshPopupIfType('scheme');
+        });
+        modeBtns.appendChild(b);
+      });
+      head.appendChild(name);
+      head.appendChild(modeBtns);
+      row.appendChild(head);
+
+      if (cfg.mode === 'select') {
+        const sw = document.createElement('div');
+        sw.className = 'role-picker-swatches';
+        currentPaletteColors.forEach(c => {
+          const b = document.createElement('button');
+          b.className = 'role-picker-swatch' + (cfg.color === c ? ' active' : '');
+          b.style.background = c;
+          b.addEventListener('click', () => {
+            cfg.color = c;
+            refreshColorSchemes();
+            refreshPopupIfType('scheme');
+          });
+          sw.appendChild(b);
+        });
+        row.appendChild(sw);
+      }
+      container.appendChild(row);
+    });
+  }
+  schemeConfigBtn.addEventListener('click', () => openPopup('scheme', 'おすすめ配色の指定', buildSchemeConfigContent));
+
+  let useDefaultPalette = false;
+
+  function applyPalette() {
+    if (useDefaultPalette) {
+      modeLabel.textContent = '定番パレット';
+      shuffleBtn.style.display = 'none';
+      colorTypeSelect.disabled = true;
+      hueTypeSelect.disabled = true;
+      buildSwatches(DEFAULT_PALETTE);
+    } else {
+      const colorTypeKey = colorTypeSelect.value;
+      const hueTypeKey = hueTypeSelect.value;
+      modeLabel.textContent = `${COLOR_TYPES[colorTypeKey].label}・${HUE_TYPES[hueTypeKey].label}`;
+      shuffleBtn.style.display = 'flex';
+      colorTypeSelect.disabled = false;
+      hueTypeSelect.disabled = false;
+      buildSwatches(generatePalette(colorTypeKey, hueTypeKey));
+    }
+  }
+
+  colorTypeSelect.addEventListener('change', applyPalette);
+  hueTypeSelect.addEventListener('change', applyPalette);
+  shuffleBtn.addEventListener('click', applyPalette);
+  defaultToggleBtn.addEventListener('click', () => {
+    useDefaultPalette = !useDefaultPalette;
+    defaultToggleBtn.classList.toggle('active', useDefaultPalette);
+    applyPalette();
+  });
+
+  // ---------- ツール切り替え ----------
+  function setTool(tool) {
+    currentTool = tool;
+    penBtns.forEach(b => b.classList.toggle('active', b.dataset.pen === tool));
+    eraserBtn.classList.toggle('active', tool === 'eraser');
+    bucketBtn.classList.toggle('active', tool === 'bucket');
+    panToolBtn.classList.toggle('active', tool === 'pan');
+  }
+  penBtns.forEach(b => b.addEventListener('click', () => setTool(b.dataset.pen)));
+  eraserBtn.addEventListener('click', () => setTool('eraser'));
+  bucketBtn.addEventListener('click', () => setTool('bucket'));
+  panToolBtn.addEventListener('click', () => setTool('pan'));
+
+
+  sizeSlider.addEventListener('input', () => {
+    sizeValueLabel.textContent = `${sizeSlider.value}px`;
+  });
+
+  // キャンバスサイズ表示(ヘッダー)を更新
+  function updateCanvasSizeLabel() {
+    const preset = CANVAS_SIZE_PRESETS[selectedCanvasSizeIndex];
+    const label = document.getElementById('canvas-size-label');
+    if (preset.width === null) {
+      label.textContent = '';
+    } else {
+      label.textContent = `${preset.width}×${preset.height}`;
+    }
+  }
+
+  // ---------- キャンバスサイズ(解像度はズームに関係なくwrapの実サイズに固定) ----------
+  function resizeAllCanvases() {
+    const preset = CANVAS_SIZE_PRESETS[selectedCanvasSizeIndex];
+    // 固定サイズが選択されている場合はそれを使う、そうでなければ画面サイズに合わせる
+    let cssW, cssH;
+    if (preset.width !== null) {
+      cssW = preset.width;
+      cssH = preset.height;
+    } else {
+      const rect = wrap.getBoundingClientRect();
+      cssW = Math.round(rect.width);
+      cssH = Math.round(rect.height);
+    }
+
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+
+    layers.forEach(layer => {
+      const prev = document.createElement('canvas');
+      prev.width = layer.canvas.width;
+      prev.height = layer.canvas.height;
+      if (prev.width > 0) prev.getContext('2d').drawImage(layer.canvas, 0, 0);
+
+      layer.canvas.width = cssW * dpr;
+      layer.canvas.height = cssH * dpr;
+      // CSSの表示サイズも明示的に固定し、内部解像度との比率を必ずdprに保つ
+      layer.canvas.style.width = cssW + 'px';
+      layer.canvas.style.height = cssH + 'px';
+      layer.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      layer.ctx.lineCap = 'round';
+      layer.ctx.lineJoin = 'round';
+      layer.ctx.imageSmoothingEnabled = false; // アンチエイリアスの影響を可能な範囲で抑える
+
+      if (prev.width > 0) {
+        // 生ピクセル同士で1:1に貼り戻す(拡大縮小を挟まずズレを防ぐ)
+        layer.ctx.save();
+        layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        layer.ctx.drawImage(prev, 0, 0);
+        layer.ctx.restore();
+      }
+    });
+    // #paperもキャンバスと同じ整数サイズに揃える
+    paper.style.width = cssW + 'px';
+    paper.style.height = cssH + 'px';
+    clampPan();
+    applyZoom();
+  }
+
+  // ---------- 座標変換: 画面座標 → ズーム/パンを考慮したキャンバス座標 ----------
+  // 位置(原点)は実際の描画結果から測り、スケールはzoom変数をそのまま使う。
+  // 以前は縦横それぞれの実測サイズを基準サイズで割ってスケールを求めていたが、
+  // #canvas-wrapはflex:1で高さが決まるためサブピクセルの端数を持ちやすく、
+  // その除算結果がzoomからわずかにズレて縦方向だけ誤差が拡大していた。
+  function getPos(e) {
+    const canvasRect = layers[0].canvas.getBoundingClientRect(); // transform適用後の実表示矩形
+    const t = e.touches ? e.touches[0] : e;
+    return {
+      x: (t.clientX - canvasRect.left) / zoom,
+      y: (t.clientY - canvasRect.top) / zoom,
+      t: Date.now(),
+    };
+  }
+
+  function strokeWidthFor() {
+    const base = Number(sizeSlider.value);
+    if (currentTool === 'pen') return Math.max(1, base * PEN_STYLES.pen.widthMul);
+    if (currentTool === 'pen2') {
+      // ペン2(正方形ドット)は strokeWidthFor で値を求めない(size スライダーをそのまま使う)
+      return base;
+    }
+    return base;
+  }
+
+  function pushHistory(layer) {
+    layer.undoStack.push(layer.canvas.toDataURL());
+    if (layer.undoStack.length > 20) layer.undoStack.shift();
+    layer.redoStack = [];
+  }
+
+  // ---------- バケツ塗り ----------
+  const colorProbe = document.createElement('canvas');
+  colorProbe.width = 1; colorProbe.height = 1;
+  const colorProbeCtx = colorProbe.getContext('2d');
+  function colorToRGBA(str) {
+    colorProbeCtx.clearRect(0, 0, 1, 1);
+    colorProbeCtx.fillStyle = str;
+    colorProbeCtx.fillRect(0, 0, 1, 1);
+    return colorProbeCtx.getImageData(0, 0, 1, 1).data;
+  }
+
+  function floodFillAt(layer, cssX, cssY, fillColorStr) {
+    const canvas = layer.canvas;
+    const w = canvas.width, h = canvas.height;
+    const px = Math.floor(cssX * dpr);
+    const py = Math.floor(cssY * dpr);
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
+
+    const imgData = layer.ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+    const fillColor = colorToRGBA(fillColorStr);
+
+    const startIdx = (py * w + px) * 4;
+    const target = [data[startIdx], data[startIdx + 1], data[startIdx + 2], data[startIdx + 3]];
+
+    if (Math.abs(target[0] - fillColor[0]) <= 4 &&
+        Math.abs(target[1] - fillColor[1]) <= 4 &&
+        Math.abs(target[2] - fillColor[2]) <= 4 &&
+        Math.abs(target[3] - fillColor[3]) <= 4) {
+      return;
+    }
+
+    const tolerance = 32;
+    const tol2 = tolerance * tolerance;
+    function matches(idx) {
+      const dr = data[idx] - target[0];
+      const dg = data[idx + 1] - target[1];
+      const db = data[idx + 2] - target[2];
+      const da = data[idx + 3] - target[3];
+      return dr * dr + dg * dg + db * db + da * da <= tol2;
+    }
+    function setPixel(idx) {
+      data[idx] = fillColor[0];
+      data[idx + 1] = fillColor[1];
+      data[idx + 2] = fillColor[2];
+      data[idx + 3] = fillColor[3];
+    }
+
+    const stack = [[px, py]];
+    while (stack.length) {
+      const [cx, cy] = stack.pop();
+      const rowIdx = cy * w;
+      if (!matches((rowIdx + cx) * 4)) continue;
+
+      let xl = cx;
+      while (xl > 0 && matches((rowIdx + xl - 1) * 4)) xl--;
+      let xr = cx;
+      while (xr < w - 1 && matches((rowIdx + xr + 1) * 4)) xr++;
+
+      for (let i = xl; i <= xr; i++) setPixel((rowIdx + i) * 4);
+
+      [cy - 1, cy + 1].forEach(ny => {
+        if (ny < 0 || ny >= h) return;
+        const nRowIdx = ny * w;
+        let i = xl;
+        while (i <= xr) {
+          if (matches((nRowIdx + i) * 4)) {
+            stack.push([i, ny]);
+            while (i <= xr && matches((nRowIdx + i) * 4)) i++;
+          } else {
+            i++;
+          }
+        }
+      });
+    }
+
+    layer.ctx.putImageData(imgData, 0, 0);
+  }
+
+  function restoreFromDataURL(layer, dataUrl) {
+    const img = new Image();
+    img.onload = () => {
+      // CSS座標を経由せず生ピクセルのまま1:1で貼り戻す。
+      // rect基準で貼り直すと、undoのたびに端数分の拡大縮小が入りズレが蓄積する。
+      layer.ctx.save();
+      layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      layer.ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+      layer.ctx.drawImage(img, 0, 0);
+      layer.ctx.restore();
+    };
+    img.src = dataUrl;
+  }
+
+  // ---------- 描画 / 単指パン(ツール選択時) ----------
+  function start(e) {
+    e.preventDefault();
+    const t = e.touches ? e.touches[0] : e;
+
+    if (currentTool === 'pan') {
+      panStart = { x: t.clientX, y: t.clientY, panX, panY };
+      drawing = true;
+      return;
+    }
+
+    const layer = activeLayer();
+    const p = getPos(e);
+
+    if (currentTool === 'bucket') {
+      pushHistory(layer);
+      floodFillAt(layer, p.x, p.y, currentColor);
+      drawing = false;
+      return;
+    }
+
+    drawing = true;
+    pushHistory(layer);
+    rawPoint = { x: p.x, y: p.y };
+    smoothPoint = { x: p.x, y: p.y };
+    lastTime = p.t;
+
+    if (currentTool === 'eraser') {
+      layer.ctx.save();
+      layer.ctx.globalCompositeOperation = 'destination-out';
+      layer.ctx.beginPath();
+      layer.ctx.arc(snap(p.x), snap(p.y), (Number(sizeSlider.value) * 1.4) / 2, 0, Math.PI * 2);
+      layer.ctx.fill();
+      layer.ctx.restore();
+    } else if (currentTool === 'pen2') {
+      // 正方形ドット
+      const size = Number(sizeSlider.value);
+      layer.ctx.save();
+      layer.ctx.fillStyle = currentColor;
+      layer.ctx.fillRect(snap(p.x - size / 2), snap(p.y - size / 2), size, size);
+      layer.ctx.restore();
+    } else {
+      // pen: 通常の円形ペン
+      layer.ctx.save();
+      layer.ctx.beginPath();
+      layer.ctx.arc(snap(p.x), snap(p.y), strokeWidthFor() / 2, 0, Math.PI * 2);
+      layer.ctx.fillStyle = currentColor;
+      layer.ctx.fill();
+      layer.ctx.restore();
+    }
+  }
+
+  function move(e) {
+    if (currentTool === 'pan') {
+      if (!drawing || !panStart) return;
+      e.preventDefault();
+      const t = e.touches ? e.touches[0] : e;
+      panX = panStart.panX + (t.clientX - panStart.x);
+      panY = panStart.panY + (t.clientY - panStart.y);
+      clampPan();
+      applyZoom();
+      return;
+    }
+    if (currentTool === 'bucket') return; // バケツはタップのみ
+    if (!drawing) return;
+    e.preventDefault();
+    const p = getPos(e);
+    const dt = Math.max(1, p.t - lastTime);
+    lastTime = p.t;
+
+    const factor = SMOOTHING_LEVELS[smoothingIndex].factor;
+    const prevSmooth = { x: smoothPoint.x, y: smoothPoint.y };
+    smoothPoint.x += (p.x - smoothPoint.x) * factor;
+    smoothPoint.y += (p.y - smoothPoint.y) * factor;
+
+    if (currentTool === 'pen') {
+      // ペン: ほんのり位置ジッター(スムージングされた線に細かい手ぶれ感を足す)
+      smoothPoint.x += (Math.random() - 0.5) * 0.6;
+      smoothPoint.y += (Math.random() - 0.5) * 0.6;
+    }
+
+    const layer = activeLayer();
+    const fromX = snap(prevSmooth.x), fromY = snap(prevSmooth.y);
+    const toX = snap(smoothPoint.x), toY = snap(smoothPoint.y);
+
+    if (currentTool === 'eraser') {
+      layer.ctx.save();
+      layer.ctx.globalCompositeOperation = 'destination-out';
+      layer.ctx.lineWidth = Number(sizeSlider.value) * 1.4;
+      layer.ctx.beginPath();
+      layer.ctx.moveTo(fromX, fromY);
+      layer.ctx.lineTo(toX, toY);
+      layer.ctx.stroke();
+      layer.ctx.restore();
+    } else if (currentTool === 'pen2') {
+      // 正方形ドット: 始点から終点への直線に沿ってドットを敷く
+      const size = Number(sizeSlider.value);
+      const dx = toX - fromX, dy = toY - fromY;
+      const dist = Math.hypot(dx, dy);
+      const step = Math.max(1, Math.ceil(size / 2)); // ドット間隔(重ねられるように)
+      layer.ctx.save();
+      layer.ctx.fillStyle = currentColor;
+      for (let i = 0; i <= dist; i += step) {
+        const t = dist > 0 ? i / dist : 0;
+        const x = fromX + dx * t;
+        const y = fromY + dy * t;
+        layer.ctx.fillRect(snap(x - size / 2), snap(y - size / 2), size, size);
+      }
+      layer.ctx.restore();
+    } else {
+      // ペン: 通常の円形ストローク
+      layer.ctx.save();
+      layer.ctx.strokeStyle = currentColor;
+      layer.ctx.lineWidth = strokeWidthFor();
+      layer.ctx.beginPath();
+      layer.ctx.moveTo(fromX, fromY);
+      layer.ctx.lineTo(toX, toY);
+      layer.ctx.stroke();
+      layer.ctx.restore();
+    }
+  }
+
+  function end() {
+    drawing = false;
+    panStart = null;
+  }
+
+  // 描画中に(実際に何か描く前の)ストロークが2本指操作へ切り替わった場合、
+  // start()で積んだ履歴を巻き戻して「うっかり点が残る」のを防ぐ
+  function cancelActiveStroke() {
+    if (!drawing || currentTool === 'pan') { drawing = false; panStart = null; return; }
+    const layer = activeLayer();
+    if (layer.undoStack.length) {
+      const snapshot = layer.undoStack.pop();
+      restoreFromDataURL(layer, snapshot);
+    }
+    drawing = false;
+  }
+
+  // ---------- マウス(デスクトップ用、単指相当) ----------
+  wrap.addEventListener('mousedown', start);
+  wrap.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end);
+
+  // ========================================================================
+  // タッチ: 1本指=描画 / 2本指=パン+ピンチズーム(同時対応)
+  // ========================================================================
+  const touchPoints = new Map(); // identifier -> {x,y}
+  let gestureMode = null; // null | 'draw' | 'pinch'
+  let pinchState = null;
+
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+  function onTouchStart(e) {
+    for (const t of e.changedTouches) touchPoints.set(t.identifier, { x: t.clientX, y: t.clientY });
+
+    if (touchPoints.size === 1 && gestureMode === null) {
+      e.preventDefault();
+      gestureMode = 'draw';
+      start(e);
+    } else if (touchPoints.size === 2) {
+      e.preventDefault();
+      if (gestureMode === 'draw') cancelActiveStroke();
+      gestureMode = 'pinch';
+      const pts = [...touchPoints.values()];
+      pinchState = {
+        startDist: dist(pts[0], pts[1]),
+        startZoom: zoom,
+        startMid: mid(pts[0], pts[1]),
+        startPanX: panX,
+        startPanY: panY,
+      };
+    } else if (touchPoints.size > 2) {
+      e.preventDefault(); // 3本目以降は無視(既存の2本指ジェスチャーを継続)
+    }
+  }
+
+  function onTouchMove(e) {
+    for (const t of e.changedTouches) if (touchPoints.has(t.identifier)) touchPoints.set(t.identifier, { x: t.clientX, y: t.clientY });
+
+    if (gestureMode === 'draw' && touchPoints.size === 1) {
+      e.preventDefault();
+      move(e);
+    } else if (gestureMode === 'pinch' && touchPoints.size >= 2 && pinchState) {
+      e.preventDefault();
+      const pts = [...touchPoints.values()].slice(0, 2);
+      const newDist = dist(pts[0], pts[1]);
+      const newMid = mid(pts[0], pts[1]);
+      const ratio = newDist / Math.max(1, pinchState.startDist);
+      zoom = clampNum(pinchState.startZoom * ratio, ZOOM_MIN, ZOOM_MAX);
+
+      const rect = wrap.getBoundingClientRect();
+      const anchorX = pinchState.startMid.x - rect.left;
+      const anchorY = pinchState.startMid.y - rect.top;
+      // ピンチ開始点(アンカー)のステージ座標を維持しつつ、中点の移動量をパンとして反映する
+      const stageLocalX = (anchorX - pinchState.startPanX) / pinchState.startZoom;
+      const stageLocalY = (anchorY - pinchState.startPanY) / pinchState.startZoom;
+      const newAnchorX = newMid.x - rect.left;
+      const newAnchorY = newMid.y - rect.top;
+      panX = newAnchorX - stageLocalX * zoom;
+      panY = newAnchorY - stageLocalY * zoom;
+      clampPan();
+      applyZoom();
+    }
+  }
+
+  function onTouchEnd(e) {
+    for (const t of e.changedTouches) touchPoints.delete(t.identifier);
+
+    if (gestureMode === 'draw') {
+      end();
+    } else if (gestureMode === 'pinch' && touchPoints.size < 2) {
+      pinchState = null;
+    }
+    if (touchPoints.size === 0) { gestureMode = null; pinchState = null; }
+  }
+
+  wrap.addEventListener('touchstart', onTouchStart, { passive: false });
+  wrap.addEventListener('touchmove', onTouchMove, { passive: false });
+  wrap.addEventListener('touchend', onTouchEnd, { passive: false });
+  wrap.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+  // ---------- 保存 ----------
+  function mergeCanvas() {
+    const out = document.createElement('canvas');
+    out.width = layers[0].canvas.width;
+    out.height = layers[0].canvas.height;
+    const octx = out.getContext('2d');
+    octx.imageSmoothingEnabled = false;
+    octx.fillStyle = '#ffffff';
+    octx.fillRect(0, 0, out.width, out.height);
+    layers.forEach(layer => {
+      if (layer.visible) octx.drawImage(layer.canvas, 0, 0);
+    });
+    return out;
+  }
+
+  const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  saveBtn.addEventListener('click', () => {
+    const out = mergeCanvas();
+    const filename = `oekaki-${Date.now()}.png`;
+
+    out.toBlob(async (blob) => {
+      if (!blob) return fallbackOpenTab(out);
+
+      const file = new File([blob], filename, { type: 'image/png' });
+      const canUseShare = navigator.canShare && navigator.canShare({ files: [file] });
+
+      if (canUseShare) {
+        try {
+          await navigator.share({ files: [file], title: 'おえかき' });
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
+      }
+
+      if (isIOS) {
+        fallbackOpenTab(out);
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      }
+    }, 'image/png');
+  });
+
+  function fallbackOpenTab(canvasEl) {
+    const w = window.open('', '_blank');
+    if (!w) return;
+    const dataUrl = canvasEl.toDataURL('image/png');
+    w.document.write(
+      `<title>おえかき保存</title>
+       <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+       <p style="position:fixed;top:12px;left:0;right:0;text-align:center;color:#fff;font-family:sans-serif;font-size:14px;">画像を長押しして「写真に保存」を選んでください</p>
+       <img src="${dataUrl}" style="max-width:100%;height:auto;">
+       </body>`
+    );
+  }
+
+  window.addEventListener('resize', resizeAllCanvases);
+
+  // ---------- 初期化 ----------
+  resizeAllCanvases();
+  updateCanvasSizeLabel();
+  applyDefaultButtonVisibility();
+  applyPalette();
+  applyZoom();
+  setTool('pen');
+})();
+</script>
+
+</body>
+</html>
