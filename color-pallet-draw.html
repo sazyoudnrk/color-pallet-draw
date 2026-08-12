@@ -1188,16 +1188,21 @@
 
     // 空き枠への並べ方を全通り試し、前案と同じ枠に来る色が最も少ない並びを採る。
     // 枠は3つしかないため回避しきれない場合もあるが、その時は衝突数が最小のものを選ぶ。
-    const best = { order: rest, conflicts: Infinity };
+    // 衝突数が同じ並びが複数あるときはランダムに選ぶ。ここを決め打ちにすると、
+    // 前案に無い色(=どこに置いても衝突しない)が毎回同じ枠に落ちて偏る。
+    let bestConflicts = Infinity;
+    let bestOrders = [rest];
     permutations(rest).forEach(order => {
       let conflicts = 0;
       order.forEach((color, k) => {
         if (prevPlacement && prevPlacement.get(color) === slots[k]) conflicts++;
       });
-      if (conflicts < best.conflicts) { best.conflicts = conflicts; best.order = order; }
+      if (conflicts < bestConflicts) { bestConflicts = conflicts; bestOrders = [order]; }
+      else if (conflicts === bestConflicts) { bestOrders.push(order); }
     });
+    const chosen = bestOrders[Math.floor(Math.random() * bestOrders.length)];
 
-    slots.forEach((slot, k) => { result[slot] = best.order[k]; });
+    slots.forEach((slot, k) => { result[slot] = chosen[k]; });
     return result.filter(Boolean);
   }
 
@@ -1238,7 +1243,8 @@
       // その未使用色を必ず含め、残り3色から差の大きい2色を足して案2にする
       const others = palette.filter(c => c !== unused);
       const twoMore = pickDistinctColors(others, 2);
-      const plan2 = applyRoleConfig([unused, ...twoMore], palette);
+      // 案1の配置を渡し、案1から続投する色は別の枠(60/30/10)に置き直す
+      const plan2 = applyRoleConfig([unused, ...twoMore], palette, placementOf(plan1));
 
       return [
         { colors: plan1, ratios: ratiosFor(plan1.length) },
@@ -1254,11 +1260,12 @@
     if (leftovers.length < 3) {
       plan2Source = [...leftovers, ...palette.filter(c => !leftovers.includes(c))];
     }
-    const plan2 = applyRoleConfig(pickDistinctColors(plan2Source, 3), palette);
+    const plan2 = applyRoleConfig(pickDistinctColors(plan2Source, 3), palette, placementOf(plan1));
 
     const schemes = [{ colors: plan1, ratios: ratiosFor(plan1.length) }];
     // 案1と全く同じ組み合わせにならない場合のみ案2を追加する
-    const same = plan2.length === plan1.length && plan2.every(c => plan1.includes(c));
+    // (色も配置も同一なら別案として意味がないため、配置まで含めて比較する)
+    const same = plan2.length === plan1.length && plan2.every((c, i) => plan1[i] === c);
     if (!same) schemes.push({ colors: plan2, ratios: ratiosFor(plan2.length) });
     return schemes;
   }
