@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>おえかき</title>
+<title>Color Cage</title>
 <style>
   :root{
     --bg: #1b1b1f;
@@ -342,7 +342,7 @@
 <body>
 
 <header>
-  <h1>おえかき <span id="mode-label"></span> <span id="canvas-size-label" style="font-size: 11px; color: var(--muted); margin-left: 8px;"></span></h1>
+  <h1>Color Cage <span id="mode-label"></span> <span id="canvas-size-label" style="font-size: 11px; color: var(--muted); margin-left: 8px;"></span></h1>
   <button id="save" title="保存">💾</button>
 </header>
 
@@ -612,6 +612,7 @@
       if (type === 'colorwheel') buildColorWheelPopupContent(body);
       if (type === 'scheme') buildSchemeConfigContent(body);
       if (type === 'zoom') buildZoomPopupContent(body);
+      if (type === 'export') buildExportPopupContent(body);
     }
   }
 
@@ -1848,10 +1849,248 @@
   const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) ||
                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-  saveBtn.addEventListener('click', () => {
-    const out = mergeCanvas();
-    const filename = `oekaki-${Date.now()}.png`;
+  // ---------- 出力(パレット資料 / 画像 / 両方) ----------
+  // 色計算は一切やり直さず、画面に表示中の currentPaletteColors と colorSchemes を
+  // そのまま描画する。別ロジックを持つと画面と出力で色が食い違うため。
+  const EXPORT_W = 1080;
+  let exportMode = 'both'; // 'palette' | 'image' | 'both'
 
+  function colorToHex(c) {
+    if (c.startsWith('#')) return c.toUpperCase();
+    const { h, s, l } = parseColorToHSL(c);
+    const [r, g, b] = hslToRgb(h, s, l);
+    return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+  // 背景色の明度に応じて読みやすい文字色を返す(画面側の配色バーと同じ判断基準)
+  function readableInk(c) {
+    return parseColorToHSL(c).l > 55 ? '#00000099' : '#ffffffdd';
+  }
+
+  // パレット部分のレイアウト寸法を先に算出する(描画と高さ計算で同じ値を使う)
+  function paletteLayout(width, colors, schemes) {
+    const pad = 48, gap = 24;
+    const inner = width - pad * 2;
+    // スウォッチは「色を見る」ことが主目的なので大きめを確保する
+    let cols = Math.max(1, Math.floor((inner + gap) / (200 + gap)));
+    cols = Math.min(cols, Math.max(1, colors.length));
+    // 列数が少ないと1枚が巨大になるので上限を設ける(1色でも間延びさせない)
+    const sw = Math.min(280, Math.floor((inner - gap * (cols - 1)) / cols));
+    const rows = Math.ceil(colors.length / cols);
+    const cellH = sw + 48; // スウォッチ + 直下のHEXコード
+    const titleH = 76;
+    const barH = 92, capH = 36, legendH = 54, blockGap = 30;
+    const schemesH = schemes.length
+      ? 46 + schemes.length * (capH + barH + 14 + legendH + blockGap)
+      : 0;
+    const height = pad + titleH + rows * cellH + (rows - 1) * gap + schemesH + pad;
+    return { pad, gap, cols, sw, rows, cellH, titleH, barH, capH, legendH, blockGap, height };
+  }
+
+  // パレット資料を ctx の (0, top) から描画し、消費した高さを返す
+  function drawPaletteSection(ctx, width, top, colors, schemes) {
+    const L = paletteLayout(width, colors, schemes);
+    let y = top;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, top, width, L.height);
+
+    y += L.pad;
+    ctx.fillStyle = '#111111';
+    ctx.font = 'bold 34px system-ui, sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.fillText('COLOR PALETTE', L.pad, y);
+    y += L.titleH;
+
+    // スウォッチ + HEX
+    colors.forEach((c, i) => {
+      const col = i % L.cols, row = Math.floor(i / L.cols);
+      const x = L.pad + col * (L.sw + L.gap);
+      const cy = y + row * (L.cellH + L.gap);
+      ctx.fillStyle = c;
+      roundRect(ctx, x, cy, L.sw, L.sw, 16);
+      ctx.fill();
+      ctx.strokeStyle = '#00000018';
+      ctx.lineWidth = 2;
+      roundRect(ctx, x, cy, L.sw, L.sw, 16);
+      ctx.stroke();
+      ctx.fillStyle = '#222222';
+      ctx.font = 'bold 26px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(colorToHex(c), x + L.sw / 2, cy + L.sw + 12);
+    });
+    y += L.rows * L.cellH + (L.rows - 1) * L.gap;
+
+    // おすすめ配色(60:30:10バー)
+    if (schemes.length) {
+      y += 46;
+      schemes.forEach((scheme, idx) => {
+        ctx.fillStyle = '#111111';
+        ctx.font = 'bold 26px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`おすすめ配色 ${idx + 1}`, L.pad, y);
+        y += L.capH;
+
+        let x = L.pad;
+        const barW = width - L.pad * 2;
+        scheme.colors.forEach((c, i) => {
+          const segW = Math.round(barW * scheme.ratios[i] / 100);
+          ctx.fillStyle = c;
+          ctx.fillRect(x, y, segW, L.barH);
+          // バー内は比率だけを大きく出す。10%枠は狭く、役割名やHEXは入りきらない
+          ctx.fillStyle = readableInk(c);
+          ctx.textAlign = 'center';
+          ctx.font = 'bold 30px system-ui, sans-serif';
+          const pct = `${scheme.ratios[i]}%`;
+          if (ctx.measureText(pct).width <= segW - 10) {
+            ctx.fillText(pct, x + segW / 2, y + L.barH / 2 - 18);
+          }
+          x += segW;
+        });
+        // 端数でバー右端が欠けないよう最後の色で埋める
+        if (x < L.pad + barW) {
+          ctx.fillStyle = scheme.colors[scheme.colors.length - 1];
+          ctx.fillRect(x, y, L.pad + barW - x, L.barH);
+        }
+        y += L.barH + 14;
+
+        // 凡例: 役割 + HEX。バー内に収まらない情報をここで確実に読めるようにする
+        const legendW = (width - L.pad * 2) / scheme.colors.length;
+        scheme.colors.forEach((c, i) => {
+          const lx = L.pad + i * legendW;
+          ctx.fillStyle = c;
+          roundRect(ctx, lx, y + 2, 22, 22, 5);
+          ctx.fill();
+          ctx.strokeStyle = '#00000022';
+          ctx.lineWidth = 1.5;
+          roundRect(ctx, lx, y + 2, 22, 22, 5);
+          ctx.stroke();
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#333333';
+          ctx.font = 'bold 20px system-ui, sans-serif';
+          // 役割はベース/アソート/アクセントの3色構成のときだけ意味を持つ
+          const role = scheme.colors.length === 3 ? ROLE_LABELS[ROLE_KEYS[i]] : '';
+          if (role) ctx.fillText(role, lx + 30, y + 2);
+          ctx.fillStyle = '#666666';
+          ctx.font = '19px ui-monospace, monospace';
+          ctx.fillText(colorToHex(c), lx + 30, y + (role ? 26 : 4));
+        });
+        y += L.legendH + L.blockGap;
+      });
+    }
+    return L.height;
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // 出力用キャンバスを組み立てる。既存キャンバスには一切手を加えない
+  function buildExportCanvas(mode) {
+    const colors = currentPaletteColors;
+    const schemes = colorSchemes;
+
+    if (mode === 'image') {
+      return mergeCanvas(); // 現在の画像をそのまま(解像度も維持)
+    }
+
+    if (mode === 'palette') {
+      const L = paletteLayout(EXPORT_W, colors, schemes);
+      const out = document.createElement('canvas');
+      out.width = EXPORT_W;
+      out.height = L.height;
+      const ctx = out.getContext('2d');
+      drawPaletteSection(ctx, EXPORT_W, 0, colors, schemes);
+      return out;
+    }
+
+    // both: 上にキャンバス画像、下にパレット
+    const img = mergeCanvas();
+    const imgH = Math.round(img.height * (EXPORT_W / img.width));
+    const L = paletteLayout(EXPORT_W, colors, schemes);
+    const out = document.createElement('canvas');
+    out.width = EXPORT_W;
+    out.height = imgH + L.height;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(img, 0, 0, EXPORT_W, imgH);
+    drawPaletteSection(ctx, EXPORT_W, imgH, colors, schemes);
+    // 画像とパレットの境界線
+    ctx.fillStyle = '#00000018';
+    ctx.fillRect(0, imgH, EXPORT_W, 2);
+    return out;
+  }
+
+  // ---- 出力ポップアップ ----
+  function buildExportPopupContent(container) {
+    const modes = [
+      ['palette', 'パレットのみ'],
+      ['image', '画像のみ'],
+      ['both', 'パレット＋画像'],
+    ];
+    const modeRow = document.createElement('div');
+    modeRow.className = 'popup-row';
+    modeRow.style.flexWrap = 'wrap';
+    modes.forEach(([key, label]) => {
+      const btn = document.createElement('button');
+      btn.className = 'icon-btn pen-btn' + (exportMode === key ? ' active' : '');
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        exportMode = key;
+        refreshPopupIfType('export');
+      });
+      modeRow.appendChild(btn);
+    });
+    container.appendChild(modeRow);
+
+    // プレビュー
+    const out = buildExportCanvas(exportMode);
+    const preview = document.createElement('img');
+    preview.src = out.toDataURL('image/png');
+    preview.style.cssText = 'width:100%;height:auto;display:block;margin:10px 0;border-radius:10px;background:#fff;';
+    container.appendChild(preview);
+
+    const actions = document.createElement('div');
+    actions.className = 'popup-row';
+    const saveOut = document.createElement('button');
+    saveOut.className = 'icon-btn pen-btn';
+    saveOut.textContent = '💾 保存';
+    saveOut.addEventListener('click', () => exportCanvas(out));
+    actions.appendChild(saveOut);
+
+    // クリップボードコピーは対応環境でのみ出す(iOS Safariは未対応のことが多い)
+    if (navigator.clipboard && window.ClipboardItem) {
+      const copyOut = document.createElement('button');
+      copyOut.className = 'icon-btn pen-btn';
+      copyOut.textContent = '📋 コピー';
+      copyOut.addEventListener('click', () => {
+        out.toBlob(async (blob) => {
+          if (!blob) return;
+          try {
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            copyOut.textContent = '✅ コピー済';
+            setTimeout(() => { copyOut.textContent = '📋 コピー'; }, 1500);
+          } catch (err) {
+            copyOut.textContent = '⚠️ 失敗';
+            setTimeout(() => { copyOut.textContent = '📋 コピー'; }, 1500);
+          }
+        }, 'image/png');
+      });
+      actions.appendChild(copyOut);
+    }
+    container.appendChild(actions);
+  }
+
+  // 既存の保存導線(共有 → ダウンロード → iOSは別タブ表示)を出力全体で共用する
+  function exportCanvas(out) {
+    const filename = `color-cage-${Date.now()}.png`;
     out.toBlob(async (blob) => {
       if (!blob) return fallbackOpenTab(out);
 
@@ -1860,7 +2099,7 @@
 
       if (canUseShare) {
         try {
-          await navigator.share({ files: [file], title: 'おえかき' });
+          await navigator.share({ files: [file], title: 'Color Cage' });
           return;
         } catch (err) {
           if (err && err.name === 'AbortError') return;
@@ -1880,14 +2119,16 @@
         setTimeout(() => URL.revokeObjectURL(url), 10000);
       }
     }, 'image/png');
-  });
+  }
+
+  saveBtn.addEventListener('click', () => openPopup('export', '出力', buildExportPopupContent));
 
   function fallbackOpenTab(canvasEl) {
     const w = window.open('', '_blank');
     if (!w) return;
     const dataUrl = canvasEl.toDataURL('image/png');
     w.document.write(
-      `<title>おえかき保存</title>
+      `<title>Color Cage 保存</title>
        <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;">
        <p style="position:fixed;top:12px;left:0;right:0;text-align:center;color:#fff;font-family:sans-serif;font-size:14px;">画像を長押しして「写真に保存」を選んでください</p>
        <img src="${dataUrl}" style="max-width:100%;height:auto;">
